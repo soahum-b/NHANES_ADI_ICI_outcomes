@@ -1,193 +1,243 @@
 # Bolte 17-group plant-based dietary index in NHANES 2011–2018
 
-Replication code for the healthful / unhealthful / overall plant-based dietary indices
+Replication code for the healthful, unhealthful and overall plant-based dietary indices
 (hPDI, uPDI, oPDI) built on the **17 food groups of Bolte et al. 2023**
-(*JAMA Oncol* 9(5):705–709, doi:10.1001/jamaoncol.2022.7753), which adapt the Satija
-et al. 2017 categories by collapsing nuts and legumes into one group.
+(*JAMA Oncol* 9(5):705–709, doi:10.1001/jamaoncol.2022.7753), which adapt the 18 groups of
+Satija et al. 2017 by collapsing nuts and legumes into one group. Indices are computed on
+NHANES 2011–2018 day-1 dietary recalls for adults aged 20 and over and related to
+socioeconomic position (income-to-poverty ratio, education, family income).
 
-All estimation is survey-weighted and design-based. **R produces every statistic;
-Python only draws figures and renders tables** — neither crosses over, so the two sides
-can be checked independently.
+All estimation is survey-weighted and design-based. R produces every statistic; Python
+only draws figures and renders tables. Neither side calls the other, so each can be
+checked independently.
 
----
+## Contents
 
-## Repository layout — what is committed and what is not
+1. [Requirements](#requirements)
+2. [Quick start](#quick-start)
+3. [Full pipeline](#full-pipeline)
+4. [Repository layout and data provenance](#repository-layout-and-data-provenance)
+5. [Methods notes](#methods-notes)
+6. [Citation](#citation)
+7. [Revision notes](#revision-notes)
 
-The bundle is split so that a public push carries no third-party item text.
+## Requirements
 
-| Path | Committed? | Why |
-|---|---|---|
-| `scripts/` | yes | all code |
-| `data/interim/dhq_food_classification_public.csv` | **yes** | derived NHANES-code→category mapping, four columns, no DHQ item text (checked — see below) |
-| `data_restricted/raw/dhq/DHQ_Dictionary_V2.csv` | **no** | the annotated DHQ item list |
-| `data_restricted/interim/dhq_manual_overrides.csv` | **no** | 351 hand adjudications; 5 of the notes quote DHQ item text verbatim |
-| `data/raw/cdc/`, `data/raw/fped/` | no | several hundred MB, re-fetchable with `01_download.sh` |
-| `results/`, `figures/` | no | generated |
+- **R 4.5.3** with `survey` 4.5, `emmeans` 2.0.4, `haven`, `dplyr`, `tidyr`, `tibble`,
+  `purrr`, `readr`, `broom` (versions in `docs/environment_r.txt`).
+- **Python 3.11** with `matplotlib`, `pandas`, `numpy` (versions in
+  `docs/environment_python.txt`; the other packages listed there belong to the parent
+  project and are not imported by any script in this repository).
+- `curl` and `bsdtar` (`libarchive-tools` on Debian/Ubuntu; included in macOS) for
+  `01_download.sh`, which unpacks the USDA self-extracting `.exe` archives.
+- Several hundred MB of disk for the raw downloads.
 
-`.gitignore` enforces all of this, including excluding `data_restricted/` wholesale.
+Both environment files pin direct dependencies only. There is no lock file, so transitive
+versions are not fixed.
 
-**The split is exact, not approximate:** `35_dhq_bolte_reclassify.py` is the only script
-that reads either restricted file, and it is also the only script that needs them. It
-refuses to run without them (the 351 overrides are part of the method, so a silent skip
-would regenerate a different classification). `36_dhq_scores_panels.R` reads the full
-`results/bolte/dhq_food_classification.csv` when `35_` has been run and otherwise falls
-back to the committed `data/interim/dhq_food_classification_public.csv`, which `35_`
-itself writes. So the committed tier runs end to end from `36_` onward, skipping `34b_`
-and `35_`.
+## Quick start
 
-### Is there a public source for the DHQ dictionary?
+Everything is run **from the repository root**, never from `scripts/`.
 
-**Public.** NCI's Diet History Questionnaire is a freely available FFQ for adults, and NCI
-distributes the DHQ III nutrient and food-group database as a downloadable CSV built from
-NHANES 24-hour recall data (<https://epi.grants.cancer.gov/dhq3/>).
-
-**Not public.** `DHQ_Dictionary_V2.csv` is not that database. It is 453 DHQ items carrying
-five hand-built classification columns — `NOVA`, `FoodGroup_Bolte`,
-`Plant_Based_Index_Bolte`, `aMED_Groups` and `Plant_Based_Index`. NCI publishes food groups
-on the USDA pyramid-servings scheme, not these. The mappings are research work product;
-this pipeline uses one of the five columns.
-
-**The category definitions are separately published:** Bolte et al.'s eTable 2 lists the 17
-groups and their constituent items, and Satija et al. 2017 gives the parent 18-group
-scheme. An equivalent mapping can be rebuilt from those.
-
-### What was checked, and one correction
-
-An earlier version of this README claimed the derived classification "contains no DHQ
-content". **That was wrong** — the full `dhq_food_classification.csv` carries verbatim DHQ
-item descriptions in `matched_dhq_item` on 5,708 of 7,418 rows. The committed file is a
-four-column cut (`code`, `DESCRIPTION`, `category`, `tier`) with all seven
-matcher-diagnostic columns removed, including both DHQ-bearing ones.
-
-Provenance of what remains: `code` is an FNDDS 8-digit food code (public, CDC/USDA);
-`DESCRIPTION` is NHANES per-food FPED text (public); `category` is a Bolte group label from
-their published eTable 2; `tier` is this project's own matcher label.
-
-Eleven distinctive DHQ strings do appear in the committed file, and all of them were
-checked against the raw NHANES food descriptions: each occurs **inside a genuine NHANES
-FPED description** (e.g. "Macaroni and cheese", "Cream cheese,"). The overlap is expected
-rather than suspicious — NCI builds the DHQ database from NHANES recall data, so the two
-food lists share vocabulary and formatting. By contrast, "Avocado/ guacamole," and
-"Catsup or ketchup" appear nowhere in NHANES text, and those are in the **restricted**
-override notes, not the committed file.
-
-**One caveat the column surgery does not remove:** the code-to-category mapping is
-*derived from* the DHQ annotations, so it remains a derivative work. Stripping columns
-addresses verbatim redistribution, not attribution — cite whoever built the annotations
-regardless.
-
-## Run order
-
-Run every script **from the project root**, not from `scripts/`.
+The repository ships the finished food-code classification
+(`data/interim/dhq_food_classification_public.csv`), so the full set of 17-group results
+can be reproduced without the restricted inputs described below:
 
 ```bash
-bash   scripts/01_download.sh              # CDC XPT + USDA FPED (needs network + bsdtar/libarchive)
-Rscript scripts/02_harmonize_score.R       # analytic sample; HEI-2020 + NRF9.3
-Rscript scripts/05_hpdi.R                  # 18-group plant indices
-Rscript scripts/02_harmonize_score.R       # RE-RUN: see the note below
-Rscript scripts/34b_nhanes_food_codes.R    # food codes + weighted intake per code
-python  scripts/35_dhq_bolte_reclassify.py # assign codes to the 17 Bolte groups (needs data_restricted/)
-Rscript scripts/36_dhq_scores_panels.R     # 17-group scores + all figure inputs
-python  scripts/37_dhq_pca_loadings_table.py
+bash    scripts/01_download.sh                     # CDC XPT files + USDA FPED (network)
+Rscript scripts/02_harmonize_score.R               # analytic sample, HEI-2020, NRF9.3
+Rscript scripts/05_hpdi.R                          # 18-group indices (Satija)
+Rscript scripts/02_harmonize_score.R               # second pass: attaches the 18-group indices
+Rscript scripts/36_dhq_scores_panels.R             # 17-group indices + all figure inputs
+python  scripts/37_dhq_pca_loadings_table.py       # PCA loadings tables
+python  scripts/fig_dhq3_pdi_vs_ses.py             # figures (see below for the rest)
 ```
 
-### `02_` is run twice, and that is not a mistake
+`36_` prints `classification source: data/interim/dhq_food_classification_public.csv`
+when it is using the shipped file.
 
-`02_harmonize_score.R` merges the plant-index columns **if** `05_hpdi.R` has already
-written them, while `05_hpdi.R` reads the analytic dataset that `02_` produces. The order
-is therefore **02 → 05 → 02**. The first pass builds the dataset without the indices; the
-second attaches them.
+## Full pipeline
 
-### Running the committed tier only (no DHQ dictionary)
+### Scripts, inputs and outputs
 
-`35_` writes the committed cut, so on a clone that has it you skip both `34b_` and `35_`:
+| Script | Reads | Writes |
+|---|---|---|
+| `01_download.sh` | network | `data/raw/cdc/*.xpt`, `data/raw/fped/*.sas7bdat` |
+| `02_harmonize_score.R` | raw CDC + FPED per-person files; `data/interim/hpdi_scores.rds` if present | `data/interim/nhanes_analytic.{csv,rds}` |
+| `05_hpdi.R` | FPED per-food files; `nhanes_analytic.rds` | `data/interim/hpdi_scores.{csv,rds}` (oPDI, hPDI, uPDI, 18 groups) |
+| `34b_nhanes_food_codes.R` | FPED per-food files; `nhanes_analytic.rds` | `data/interim/nhanes_codes_all.csv`, `nhanes_code_intake.csv` |
+| `35_dhq_bolte_reclassify.py` | the two files above; **`data_restricted/`** | `results/bolte/dhq_*.csv` (full classification, review queue, summaries); `data/interim/dhq_food_classification_public.csv` |
+| `36_dhq_scores_panels.R` | FPED per-food files; `nhanes_analytic.rds`; a classification file | `data/interim/dhq_scores.rds`; `results/dhq/{coverage,pd_main,trend_tests,food_odds,pca_loadings,pca_variance,pca_scores}.csv` |
+| `37_dhq_pca_loadings_table.py` | `results/dhq/pca_loadings.csv` | `results/dhq/bolte17_pca_loadings_table{,_full}.csv` |
+| `13_table1.R` | `nhanes_analytic.rds` (+ `dhq_scores.rds` with `BOLTE17=1`) | `results/[bolte17_]table1_{quartile,tertile}.csv` |
+| `38_table1_quartiles4.R` | same | `results/[bolte17_][median_]table1_4quartiles.csv` |
+| `39_table1_missing.R` | same | `results/[bolte17_]table1_missing_supplement.csv` |
+| `fig_dhq*.py` | `results/dhq/*.csv` | `figures/dhq/*.png` with vector twins in `figures/dhq/{pdf,svg}/` |
+
+### Order, including the classification step
 
 ```bash
 bash    scripts/01_download.sh
-Rscript scripts/02_harmonize_score.R && Rscript scripts/05_hpdi.R && Rscript scripts/02_harmonize_score.R
-Rscript scripts/36_dhq_scores_panels.R      # prints "classification source: data/interim/..."
+Rscript scripts/02_harmonize_score.R
+Rscript scripts/05_hpdi.R
+Rscript scripts/02_harmonize_score.R               # second pass, see below
+Rscript scripts/34b_nhanes_food_codes.R            # only needed before 35_
+python  scripts/35_dhq_bolte_reclassify.py         # needs data_restricted/
+Rscript scripts/36_dhq_scores_panels.R
 python  scripts/37_dhq_pca_loadings_table.py
 ```
 
-### Tables — the 17-group variants are environment switches
+**`02_` runs twice by design.** `05_hpdi.R` reads the analytic dataset that `02_` writes,
+and `02_` merges the 18-group index columns into that dataset only if `05_` has already
+produced them. The first pass builds the dataset without the indices; the second attaches
+them. Skipping the second pass leaves `13_`, `38_` and `39_` without `oPDI`/`hPDI`/`uPDI`
+unless `BOLTE17=1` is set.
+
+**Which classification `36_` uses.** In order of precedence:
+
+1. `$DHQ_CLASSIFICATION`, if set. The file must exist and carry `code`, `category` and
+   `tier` columns; the script stops rather than falling back to another file.
+2. `results/bolte/dhq_food_classification.csv`, the full output of `35_`, if present.
+3. `data/interim/dhq_food_classification_public.csv`, the committed four-column cut.
+
+The script prints which one it used.
+
+### Tables
+
+The table scripts report the **18-group** indices by default. Set `BOLTE17=1` for the
+17-group indices from `36_`; everything else (design, groups, tests, formatting) is
+identical, so the two variants are directly comparable.
 
 ```bash
-BOLTE17=1              Rscript scripts/13_table1.R            # cohort table, extreme groups
-BOLTE17=1              Rscript scripts/38_table1_quartiles4.R # all four PIR quartiles, mean (SD)
-BOLTE17=1 MEDIAN=1     Rscript scripts/38_table1_quartiles4.R # same, median (IQR)
-BOLTE17=1              Rscript scripts/39_table1_missing.R    # missingness supplement
+BOLTE17=1           Rscript scripts/13_table1.R             # cohort table, Q1 vs Q4 and T1 vs T3
+BOLTE17=1           Rscript scripts/38_table1_quartiles4.R  # all four PIR quartiles, mean (SD)
+BOLTE17=1 MEDIAN=1  Rscript scripts/38_table1_quartiles4.R  # same, median (IQR)
+BOLTE17=1           Rscript scripts/39_table1_missing.R     # missingness supplement
 ```
 
-Without `BOLTE17=1` these scripts report the **18-group** indices instead.
-
-`36_dhq_scores_panels.R` takes one more switch: `DHQ_CLASSIFICATION=/path/to/file.csv`
-points it at a classification held outside the tree (it needs the `code`, `category` and
-`tier` columns). When set, the file must exist; the script stops rather than falling back. `MEDIAN=1`
-switches the continuous rows to survey-weighted median (IQR) and swaps the omnibus test
-from a Wald test to a **design-based Kruskal–Wallis** (`svyranktest`), so the test matches
-the statistic being displayed.
+`MEDIAN=1` switches the continuous rows of `38_` to survey-weighted median (IQR) and
+replaces the omnibus Wald test with a design-based Kruskal–Wallis test (`svyranktest`),
+so the test matches the statistic displayed. P-for-trend remains the linear term of the
+quartile rank, which is mean-based, and is labelled as such in the output.
 
 ### Figures
 
 ```bash
-python scripts/fig_dhq3_pdi_vs_ses.py    # hPDI/uPDI vs PIR, education, income (6 panels)
-python scripts/fig_dhq4_food_odds.py     # food-group odds per +1 PIR
-python scripts/fig_dhq5_pca.py           # PCA biplots, poorest vs richest quartile
-python scripts/fig_dhq_split_panels.py   # the 6 panels as standalone figures
+python scripts/fig_dhq3_pdi_vs_ses.py     # hPDI/uPDI vs PIR, education, income (6 panels)
+python scripts/fig_dhq4_food_odds.py      # odds of high consumption per +1 PIR, by food group
+python scripts/fig_dhq5_pca.py            # PCA biplots, poorest vs richest PIR quartile
+python scripts/fig_dhq_split_panels.py    # the 6 panels as standalone figures
 ```
 
-The `fig_dhq*` scripts are thin wrappers that parameterise `fig_bolte*` by input
-directory, output path and grouping label, so the 16- and 17-group versions are drawn by
-the same code and cannot drift apart. `figsave.py` writes PNG, SVG and PDF together.
+The `fig_dhq*` scripts are thin wrappers that set the input directory, output path and
+grouping label on the `fig_bolte*` modules, so the 16- and 17-group versions of each
+figure are drawn by one code path. `figsave.py` writes PNG (300 dpi), PDF and SVG together,
+with TrueType font embedding. `fig8_pca_biplot.py` is present only because
+`fig_bolte5_pca.py` imports its `_biplot` helper and colour constants; its own `main()`
+renders 18-group figures from files this repository does not produce. Do not run it
+directly.
 
-`fig8_pca_biplot.py` is included **only as the shared biplot helper** that `fig_dhq5_pca.py` imports (`_biplot` and the colour constants). Importing it needs nothing on disk — verified — but its own `main()` renders the *18-group* figures and reads `results/pca_*.csv`, which this bundle does not produce. Do not run it directly; it is a library here.
+## Repository layout and data provenance
 
----
+| Path | Committed | Contents |
+|---|---|---|
+| `scripts/` | yes | all code |
+| `docs/` | yes | environment listings |
+| `data/interim/dhq_food_classification_public.csv` | yes | NHANES food code → Bolte category, four columns (see below) |
+| `data_restricted/raw/dhq/DHQ_Dictionary_V2.csv` | no | annotated DHQ item list |
+| `data_restricted/interim/dhq_manual_overrides.csv` | no | 351 hand adjudications with notes |
+| `data/raw/cdc/`, `data/raw/fped/` | no | public downloads, re-fetched by `01_download.sh` |
+| `data/interim/` (other files), `results/`, `figures/` | no | generated |
 
-## Methods notes that are easy to get wrong
+`.gitignore` enforces this, including excluding `data_restricted/` as a whole.
 
-- **The 17 groups come from the DHQ dictionary classification, not from FPED's food-pattern
-  components.** The per-food FPED file supplies only the food code and the gram weight.
-  The FPED-component build is a *different*, 16-group index, which cannot construct
-  *miscellaneous animal-based foods* because FPED disaggregates mixed dishes.
-- **Food codes are assigned by automated matching**, not by hand: cosine similarity on food
-  descriptions, with the FNDDS code hierarchy used as a validity check, plus rules for the
-  whole/refined-grain and whole-fruit/juice boundaries (those qualifiers decide the
-  healthful/less-healthful split and identity-only matching discards them). Of 7,418 codes,
-  2,617 are auto-accepted, **351 manually adjudicated**, and 4,450 sit in a review tier —
-  covering 73.0%, 1.8% and 25.2% of consumed grams respectively. A further **4.6% of grams
-  is unclassified**. Report this coverage; do not describe the assignment as manually
-  verified.
-- **Five dictionary categories are excluded** from the index — water, alcoholic beverages,
-  margarine, artificial sweetener and protein supplements — not two.
-- **No energy adjustment** is applied, to either the index or the models. Someone who eats
-  more of everything ranks higher in every group.
-- **Education is an UNORDERED five-level factor** with indicator contrasts against
+### The restricted inputs
+
+`35_dhq_bolte_reclassify.py` is the only script that reads either restricted file, and it
+refuses to run without both. The 351 manual overrides are part of the method; a run that
+silently skipped them would produce a different classification from the committed one.
+Collaborators who need to re-run `35_` obtain `data_restricted/` out of band.
+
+**`DHQ_Dictionary_V2.csv`** is 453 items from NCI's Diet History Questionnaire carrying
+five hand-built classification columns: `NOVA`, `FoodGroup_Bolte`,
+`Plant_Based_Index_Bolte`, `aMED_Groups` and `Plant_Based_Index`. This pipeline uses
+`Plant_Based_Index_Bolte` only. The DHQ itself is public, and NCI distributes the DHQ III
+nutrient and food-group database (<https://epi.grants.cancer.gov/dhq3/>), but NCI's food
+groups follow the USDA pyramid-servings scheme; the five classification columns are
+research work product and are not that database. The category definitions they encode are
+published separately (Bolte et al. 2023, eTable 2; Satija et al. 2017), so an equivalent
+mapping can be rebuilt from those sources.
+
+**`dhq_manual_overrides.csv`** holds code, category, adjudicator and a free-text note per
+override. Several notes quote DHQ item descriptions verbatim, which is why the file is
+restricted rather than committed.
+
+### The committed classification
+
+`data/interim/dhq_food_classification_public.csv` is written by `35_` and carries four
+columns for each of the 7,418 NHANES food codes:
+
+| Column | Source |
+|---|---|
+| `code` | 8-digit FNDDS food code (CDC/USDA, public) |
+| `DESCRIPTION` | NHANES per-food description from the FPED file (public) |
+| `category` | one of the 22 dictionary category labels, or `UNMATCHED` |
+| `tier` | `accept`, `manual` or `review`; this project's own label |
+
+The full classification in `results/bolte/` additionally carries the matcher diagnostics,
+including `matched_dhq_item`, which quotes the DHQ item each code was matched to on 5,708
+rows. Those columns are stripped from the committed file, so no DHQ row is reproduced in
+it. Plain food names shared by both lists ("Applesauce", "Cream cheese") do occur in the
+NHANES descriptions; that is shared vocabulary, not copied content, since NCI builds the
+DHQ database from NHANES recall data.
+
+The code-to-category mapping is nonetheless *derived from* the DHQ annotations and remains
+a derivative work. Stripping columns addresses verbatim redistribution, not attribution;
+cite the annotations' authors regardless.
+
+## Methods notes
+
+Points where a Methods paragraph written from memory, or from the 18-group scripts, would
+be wrong for the 17-group index.
+
+- **Group membership comes from the DHQ dictionary classification, not from FPED's
+  food-pattern components.** The per-food FPED file supplies the food code and gram
+  weight; every food code belongs to exactly one category, so a food counts once. The
+  FPED-component build is a different, 16-group index that cannot construct
+  *miscellaneous animal-based foods*, because FPED disaggregates mixed dishes.
+- **Food codes are assigned by automated matching, not by hand.** IDF-weighted cosine
+  similarity on the food's leading description clause, with the FNDDS code hierarchy as a
+  plausibility check, plus rules for the whole/refined grain and whole fruit/juice
+  boundaries, which identity-only matching would otherwise discard. Of 7,418 codes, 2,617
+  are auto-accepted, 351 manually adjudicated and 4,450 remain in a review tier, covering
+  73.0%, 1.8% and 25.2% of consumed grams; a further 4.6% of grams is unclassified. Report
+  this coverage; do not describe the assignment as manually verified.
+- **Five dictionary categories are excluded** from the index: water, alcoholic beverages,
+  margarine, artificial sweeteners and protein supplements.
+- **Per-group scoring differs between `36_` and `05_`.** Both give a 1–5 score per group.
+  In `36_` non-consumers score 1 and consumers are cut at the weighted 25th, 50th and 75th
+  percentiles among consumers into scores 2–5. In `05_` non-consumers score 1 and
+  consumers are cut into weighted quintiles, so the lowest consumer quintile can also
+  score 1. The 17-group totals run 17–85 and the 18-group totals 18–90.
+- **"High consumer" also differs.** In `36_` it is the weighted 2/3 quantile among
+  consumers of the group, coded `>=`. The 16- and 18-group scripts use the weighted 2/3
+  quantile over all adults with a `>0` fallback, because the among-consumers quantile is
+  unstable for rare foods.
+- **No energy adjustment** is applied to the indices or the models. Someone who eats more
+  of everything ranks higher in every group.
+- **Education is an unordered five-level factor** with indicator contrasts against
   `<9th grade`, deliberately not an ordered or linear term, because the association is
-  non-monotonic. Its p-value is an **omnibus joint Wald test on 4 df** — it licenses "the
-  levels differ" but no claim about any specific pair. Per-level education contrasts are
-  **not** computed on this scheme.
+  non-monotonic. Its p-value is an omnibus joint Wald test on 4 df: it supports "the levels
+  differ" and nothing about any specific pair. Per-level contrasts are not computed.
 - **PIR is top-coded at 5.0.** 17.6% of sampled adults (about a quarter by survey weight)
-  sit at the ceiling, so the weighted 75th percentile *is* 5.0 and the top quartile is
-  defined by the ceiling rather than by a quantile cut. Scripts use a top-code-aware cut;
-  a naive `quantile()` split yields an empty top group.
-- **"High consumer" is defined differently in the two schemes.** Here (`36_`) it is the
-  weighted 2/3 quantile **among consumers** of that group, coded `>=`. The 16-/18-group
-  script uses the weighted 2/3 quantile **over all adults** with a `>0` fallback, because
-  the among-consumers quantile is unstable for rare foods. A Methods sentence written for
-  one is wrong for the other.
-- Item-missing PIR (~9%) is handled by **subpopulation (domain) analysis** — the design is
-  built once on the full sample and then `subset()`, never row-filtered before
+  sit at the ceiling, so the weighted 75th percentile is 5.0 and the top quartile is
+  defined by the ceiling, not by a quantile cut. A naive `quantile()` split yields an empty
+  top group; the scripts use a top-code-aware cut.
+- **Item-missing PIR (about 9%) is handled as a subpopulation.** The survey design is built
+  once on the full analytic sample and then `subset()`; rows are never dropped before
   `svydesign`, so the variance estimator keeps the full stratum/PSU structure.
-- `survey.lonely.psu = "adjust"` is set, because repeated subsetting can leave a stratum
-  with one PSU.
-
-## Environment
-
-See `docs/environment_r.txt` and `docs/environment_python.txt`. R 4.5.3 with `survey` 4.5
-and `emmeans` 2.0.4 does the estimation; CPython 3.11.15 with `matplotlib`, `pandas` and
-`numpy` draws the figures. These pin **direct** dependencies only — there is no lock file,
-so transitive versions are not fixed.
+- `options(survey.lonely.psu = "adjust")` is set throughout, because repeated subsetting
+  can leave a stratum with a single PSU.
 
 ## Citation
 
@@ -198,40 +248,32 @@ so transitive versions are not fixed.
 
 ## Revision notes
 
-### 2026-10-30: restricted-tier split made consistent with the code
+### 2026-10-30
 
-The previous revision moved the DHQ dictionary and the manual overrides into
-`data_restricted/` and shipped a four-column public classification, but the scripts
-were not updated to match. Two consequences, both verified by running the scripts:
+The restricted-tier split (DHQ dictionary and overrides moved to `data_restricted/`, a
+four-column public classification committed) was introduced in the previous revision
+without updating the scripts. Two defects, both confirmed by running the code:
 
-- `35_dhq_bolte_reclassify.py` still looked for the overrides at their old path and,
-  because that lookup was guarded by `os.path.exists()`, **ran without them and said
-  nothing**: zero codes landed in the `manual` tier instead of 351. Anyone re-running
-  `35_` would have regenerated a classification that differs from the committed one.
-- `36_dhq_scores_panels.R` only read `results/bolte/dhq_food_classification.csv`, which
-  `35_` produces, so the committed public file was never read by any script and the
-  claim that the public tier "runs from `36_` onward" did not hold.
+- `35_` looked for the overrides at their old path, and because the lookup was guarded by
+  `os.path.exists()` it ran without them and reported nothing: zero codes in the `manual`
+  tier instead of 351.
+- `36_` read only `results/bolte/dhq_food_classification.csv`, so the committed public
+  file was never used and the public tier did not run.
 
-What changed:
+Fixed in this revision:
 
-- `35_` reads both restricted inputs from `data_restricted/` and exits with an error if
-  either is missing. The overrides are part of the method, not an optional refinement.
-- `35_` now writes `data/interim/dhq_food_classification_public.csv` itself, so the
-  committed file is a script output and cannot drift from the full classification.
-- `36_` uses the full classification when present and otherwise falls back to the public
-  file, printing which it used.
-- `37_dhq_pca_loadings_table.py` carries an inlined copy of `build_pca_loadings_table()`
-  (previously imported from a script outside this bundle).
+- `35_` reads both restricted inputs from `data_restricted/` and exits if either is
+  missing; it also writes the public four-column file, so that file is a script output.
+- `36_` resolves its classification input in the order described above and stops if
+  `$DHQ_CLASSIFICATION` is set to a missing path.
+- `37_` carries an inlined copy of `build_pca_loadings_table()`, previously imported from
+  a script outside this repository.
 - `.gitignore` no longer whitelists the overrides under `data/interim/`.
+- Header comments in `05_` and `36_` corrected: `05_` reads the USDA FPED per-food file,
+  not CDC's `DR1IFF_*.xpt`, and `36_` is not "identical in form" to `05_` (see Methods
+  notes).
 
-Not changed, and worth knowing: the per-group rank scoring in `36_` is not the same rule
-as `05_hpdi.R`, despite both producing a 1-5 score per group. `05_` cuts consumers into weighted quintiles
-(the lowest consumer bin can share score 1 with non-consumers); `36_` cuts consumers
-into weighted quartiles scored 2 to 5, with non-consumers at 1. Both are on a 1 to 5
-scale per group but they are different rules, so describe each index by its own script.
-`01_download.sh` also fetches two CDC files that no script in this bundle reads: `DR2TOT`
-(it supports the usual-intake sensitivity analysis, which is outside this replication set)
-and the CDC `DR1IFF_*.xpt` individual-foods file. The food-level inputs that `05_`, `34b_`
-and `36_` actually read are the USDA FPED files `fped_dr1iff_*.sas7bdat`, fetched in the
-third block of the download script; the shared `DR1IFF` name stem is a coincidence of
-naming, not a dependency.
+Known and left as is: `01_download.sh` fetches two CDC files no script here reads,
+`DR2TOT_*.xpt` (kept for the usual-intake sensitivity analysis in the parent project) and
+`DR1IFF_*.xpt`. The food-level inputs the scripts use are the USDA `fped_dr1iff_*.sas7bdat`
+files from the download script's third block; the shared name stem is coincidental.
