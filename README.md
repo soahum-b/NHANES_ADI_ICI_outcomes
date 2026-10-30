@@ -7,9 +7,7 @@ Satija et al. 2017 by collapsing nuts and legumes into one group. Indices are co
 NHANES 2011–2018 day-1 dietary recalls for adults aged 20 and over and related to
 socioeconomic position (income-to-poverty ratio, education, family income).
 
-All estimation is survey-weighted and design-based. R produces every statistic; Python
-only draws figures and renders tables. Neither side calls the other, so each can be
-checked independently.
+All estimation is survey-weighted and design-based. 
 
 ## Contents
 
