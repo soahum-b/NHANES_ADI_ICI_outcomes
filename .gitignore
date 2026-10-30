@@ -1,0 +1,20 @@
+# RESTRICTED TIER — never commit. Contains the DHQ dictionary and the adjudication
+# notes, which quote dictionary item text verbatim. Supply out of band to collaborators
+# who need to re-run 35_.
+data_restricted/
+
+# Raw survey data is downloadable — do not commit it (several hundred MB).
+data/raw/cdc/
+data/raw/fped/
+# Everything below data/interim is generated except the public classification cut below.
+# (The hand-adjudicated overrides live in data_restricted/, excluded above.)
+data/interim/*
+# Derived NHANES-code -> category mapping, DHQ-bearing columns stripped: ships so the
+# repo runs from 36_ onward. The FULL classification carries verbatim DHQ item text in
+# matched_dhq_item and must NOT be committed.
+data/interim/dhq_food_classification.csv
+!data/interim/dhq_food_classification_public.csv
+results/
+figures/
+__pycache__/
+*.pyc

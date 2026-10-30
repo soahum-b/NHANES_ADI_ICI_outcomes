@@ -1,0 +1,17 @@
+# Python environment for NHANES_DIET_SES
+# Interpreter: CPython 3.11.15  (macOS-26.7.1-arm64-arm-64bit)
+# Conda environment name: 'python'  (R runs in a SEPARATE conda env, 'nhanes-r' -- see environment_r.txt)
+# Captured 2026-10-28 from the environment that produced the reported figures.
+#
+# DIRECT dependencies only -- the packages the project's own scripts import. This is not a
+# full lock file: transitive dependencies are left to the resolver, so a rebuild may differ
+# in versions the project never names. Sufficient to reproduce the figures and documents;
+# NOT sufficient to guarantee a byte-identical rebuild.
+python==3.11.15
+matplotlib==3.11.0
+numpy==2.4.6
+pandas==2.3.3
+pillow==12.3.0
+pypdfium2==5.9.0
+python-pptx==1.0.2
+weasyprint==69.0
