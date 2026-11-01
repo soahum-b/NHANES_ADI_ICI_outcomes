@@ -15,9 +15,6 @@
 #   code below has always used poultry (DR1I_PF_POULT). The CODE is what ran; this
 #   comment was stale. Satija's published animal category ends in a "miscellaneous
 #   animal foods" group; we use poultry as the 18th group instead, which narrows it.
-#   The JACC 2017 full text is paywalled from this environment, so the original's exact
-#   group table could not be re-verified here -- treat poultry-vs-misc-animal as a
-#   KNOWN DEVIATION of our implementation, not as a match to the published index.
 # NO ENERGY ADJUSTMENT: quintiles are taken on raw FPED servings/day, and the SES models
 #   adjust for age, sex and race/ethnicity only -- not total energy. So a person who eats
 #   more of everything ranks higher in every group. Documented, not corrected.
